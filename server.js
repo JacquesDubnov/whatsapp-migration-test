@@ -6,7 +6,7 @@ const fs = require('fs');
 const { initDatabase } = require('./lib/database');
 const { createWhatsAppClient } = require('./lib/whatsapp');
 
-const PORT = 5173;
+const PORT = process.env.PORT || 5174;
 
 const app = express();
 const server = http.createServer(app);
