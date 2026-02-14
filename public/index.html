@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp Data Viewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header id="header">
+    <h1>WhatsApp Data Viewer</h1>
+    <div class="header-right">
+      <span id="status-indicator">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Initializing</span>
+      </span>
+      <span class="stat" id="stat-chats">0 chats</span>
+      <span class="stat" id="stat-messages">0 messages</span>
+    </div>
+  </header>
+
+  <div id="progress-bar-container">
+    <div id="progress-bar"></div>
+  </div>
+
+  <main>
+    <section id="qr-container">
+      <div class="qr-card">
+        <h2>Scan QR Code</h2>
+        <p>Open WhatsApp on your phone, go to Settings > Linked Devices > Link a Device</p>
+        <div id="qr-wrapper">
+          <img id="qr-image" alt="QR Code" />
+          <div id="qr-placeholder">Waiting for QR code...</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="chat-cards-container"></section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
