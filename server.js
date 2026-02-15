@@ -54,6 +54,11 @@ app.get('/api/contacts', (req, res) => {
   res.json(contacts);
 });
 
+app.get('/api/name-map', (req, res) => {
+  const names = db.getNameMap();
+  res.json(names);
+});
+
 app.get('/api/media/:messageId', (req, res) => {
   const { messageId } = req.params;
   const msg = db.getMessageById(messageId);

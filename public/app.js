@@ -106,8 +106,13 @@
 
   function handleSyncPhase(data) {
     if (data.phase === 'downloading-media') {
-      setStatus('syncing', `Downloading media: ${data.pending} files...`);
-      progressBar.style.width = '75%';
+      const total = data.total || 0;
+      const done = data.downloaded || 0;
+      const failed = data.failed || 0;
+      const remaining = total - done - failed;
+      const pct = total > 0 ? Math.round((done + failed) / total * 100) : 0;
+      setStatus('syncing', `Downloading media: ${done}/${total} (${failed} failed, ${remaining} left)`);
+      progressBar.style.width = `${70 + (pct * 0.2)}%`;
     }
   }
 
@@ -135,21 +140,16 @@
     progressBar.style.width = '90%';
 
     try {
-      // Fetch contacts, chats in parallel
-      const [chats, contacts] = await Promise.all([
+      // Fetch name map, chats in parallel
+      const [chats, nameEntries] = await Promise.all([
         fetch('/api/chats').then(r => r.json()),
-        fetch('/api/contacts').then(r => r.json()),
+        fetch('/api/name-map').then(r => r.json()),
       ]);
 
       // Build contact lookup: jid -> best display name
       contactMap = {};
-      for (const c of contacts) {
-        contactMap[c.jid] = c.name || c.push_name || c.phone_number || c.jid.split('@')[0];
-      }
-      for (const chat of chats) {
-        if (chat.name && !contactMap[chat.jid]) {
-          contactMap[chat.jid] = chat.name;
-        }
+      for (const entry of nameEntries) {
+        contactMap[entry.jid] = entry.name;
       }
 
       chatCardsContainer.innerHTML = '';
@@ -230,7 +230,8 @@
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'chat-name';
-    nameSpan.textContent = chat.name || contactMap[chat.jid] || chat.jid.split('@')[0];
+    const chatDisplayName = chat.name || contactMap[chat.jid] || null;
+    nameSpan.textContent = (chatDisplayName && chatDisplayName !== '.') ? chatDisplayName : chat.jid.split('@')[0];
     header.appendChild(nameSpan);
 
     const jidSpan = document.createElement('span');
@@ -333,19 +334,24 @@
     tdTime.textContent = formatTimestamp(msg.timestamp);
     tr.appendChild(tdTime);
 
-    // Sender
+    // Sender -- show name + phone number
     const tdSender = document.createElement('td');
     tdSender.className = 'col-sender sender-cell';
-    let senderText;
     if (msg.is_from_me) {
-      senderText = 'You';
+      tdSender.textContent = 'You';
     } else {
-      senderText = msg.sender_name
+      const phoneNumber = msg.sender_jid ? msg.sender_jid.split('@')[0] : '';
+      const name = msg.sender_name
         || contactMap[msg.sender_jid]
         || contactMap[msg.chat_jid]
-        || (msg.sender_jid ? msg.sender_jid.split('@')[0] : 'Unknown');
+        || null;
+
+      if (name && name !== phoneNumber && name !== '.') {
+        tdSender.textContent = `${name} (${phoneNumber})`;
+      } else {
+        tdSender.textContent = phoneNumber || 'Unknown';
+      }
     }
-    tdSender.textContent = senderText;
     if (msg.sender_jid) {
       const tooltip = document.createElement('span');
       tooltip.className = 'tooltip';
@@ -354,17 +360,55 @@
     }
     tr.appendChild(tdSender);
 
-    // Content
+    // Content + inline media
     const tdContent = document.createElement('td');
     tdContent.className = 'col-content';
     tdContent.textContent = msg.content || '';
-    if (msg.media_path && msg.media_type === 'image') {
-      const img = document.createElement('img');
-      img.className = 'inline-media';
-      img.src = `/api/media/${encodeURIComponent(msg.id)}`;
-      img.alt = 'image';
-      img.loading = 'lazy';
-      tdContent.appendChild(img);
+
+    if (msg.media_path) {
+      const mediaUrl = `/api/media/${encodeURIComponent(msg.id)}`;
+
+      if (msg.media_type === 'image') {
+        const img = document.createElement('img');
+        img.className = 'inline-media';
+        img.src = mediaUrl;
+        img.alt = 'image';
+        img.loading = 'lazy';
+        img.addEventListener('click', (e) => {
+          e.stopPropagation();
+          window.open(mediaUrl, '_blank');
+        });
+        tdContent.appendChild(img);
+      } else if (msg.media_type === 'video') {
+        const video = document.createElement('video');
+        video.className = 'inline-video';
+        video.src = mediaUrl;
+        video.controls = true;
+        video.preload = 'metadata';
+        tdContent.appendChild(video);
+      } else if (msg.media_type === 'audio') {
+        const audio = document.createElement('audio');
+        audio.className = 'inline-audio';
+        audio.src = mediaUrl;
+        audio.controls = true;
+        audio.preload = 'metadata';
+        tdContent.appendChild(audio);
+      } else {
+        // document, sticker, or other -- show download link
+        const ext = msg.media_mime ? msg.media_mime.split('/').pop().split(';')[0] : 'file';
+        const link = document.createElement('a');
+        link.className = 'media-link';
+        link.href = mediaUrl;
+        link.target = '_blank';
+        link.textContent = `${msg.media_type} (.${ext})`;
+        tdContent.appendChild(link);
+      }
+    } else if (msg.media_type) {
+      // Media exists in message but wasn't downloaded (URL expired)
+      const note = document.createElement('span');
+      note.style.cssText = 'display:block;margin-top:4px;font-size:10px;color:var(--text-secondary)';
+      note.textContent = `[${msg.media_type} -- not downloaded]`;
+      tdContent.appendChild(note);
     }
     tr.appendChild(tdContent);
 

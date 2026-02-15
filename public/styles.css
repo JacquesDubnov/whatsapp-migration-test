@@ -256,7 +256,8 @@ main {
 
 .chat-card-body {
   border-top: 1px solid var(--border-card);
-  overflow-x: auto;
+  overflow: auto;
+  max-height: 80vh;
 }
 
 .chat-card.collapsed .chat-card-body {
@@ -267,12 +268,11 @@ main {
 .message-table {
   width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
 }
 
 .message-table thead th {
   position: sticky;
-  top: 48px;
+  top: 0;
   z-index: 10;
   background: var(--bg-table-header);
   text-transform: uppercase;
@@ -283,6 +283,8 @@ main {
   padding: 8px;
   text-align: left;
   border-bottom: 1px solid var(--border-row);
+  resize: horizontal;
+  overflow: hidden;
 }
 
 .message-table tbody tr {
@@ -319,7 +321,7 @@ main {
 /* Column widths */
 .col-index { width: 40px; color: var(--text-secondary); }
 .col-timestamp { width: 110px; color: var(--text-muted); white-space: nowrap; }
-.col-sender { width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.col-sender { min-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .col-content { /* flex -- takes remaining */ }
 .col-emojis { width: 70px; }
 .col-media { width: 55px; }
@@ -342,13 +344,51 @@ main {
 .media-badge.document { background: #5a275a; color: #df82df; }
 .media-badge.sticker { background: #275a4a; color: #82dfcf; }
 
-/* Inline images */
+/* Inline media */
 .inline-media {
-  max-width: 200px;
-  max-height: 150px;
+  max-width: 300px;
+  max-height: 200px;
   border-radius: 4px;
   display: block;
   margin-top: 4px;
+  cursor: pointer;
+}
+
+.inline-media:hover {
+  opacity: 0.9;
+}
+
+.inline-video {
+  max-width: 300px;
+  max-height: 200px;
+  border-radius: 4px;
+  display: block;
+  margin-top: 4px;
+}
+
+.inline-audio {
+  display: block;
+  margin-top: 4px;
+  max-width: 250px;
+}
+
+.media-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 3px 8px;
+  background: var(--bg-table-header);
+  border: 1px solid var(--border-row);
+  border-radius: 3px;
+  color: var(--accent-blue);
+  font-size: 10px;
+  text-decoration: none;
+}
+
+.media-link:hover {
+  background: var(--bg-hover);
+  text-decoration: underline;
 }
 
 /* Message ID */

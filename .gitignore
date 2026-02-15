@@ -2,4 +2,7 @@ node_modules/
 store/
 media/
 *.db
+*.db-wal
+*.db-shm
+.DS_Store
 .worktrees/
