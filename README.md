@@ -4,7 +4,7 @@ A proof-of-concept tool that extracts WhatsApp chat history via the WhatsApp Web
 
 ## Purpose
 
-This project was built as a technical feasibility test for migrating WhatsApp data into [OBLIQ](https://github.com/thirdact-obliq), a social platform by ThirdAct. The goal was to prove that:
+This project was built as a technical feasibility test for migrating WhatsApp data into OBLIQ Messaging Platform. The goal was to prove that:
 
 1. WhatsApp chat history can be extracted via the multi-device Web protocol (no phone root/jailbreak required)
 2. Messages, media files, contact names, and group metadata can be parsed into clean, structured data
