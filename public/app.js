@@ -13,13 +13,10 @@
   const chatCardsContainer = document.getElementById('chat-cards-container');
 
   // State
-  let syncSettleTimer = null;
-  let dataLoaded = false;
-  let syncInProgress = false;
   let contactMap = {}; // jid -> display name
 
   // -------------------------------------------------------
-  // A. WebSocket
+  // A. WebSocket (only used during sync phase)
   // -------------------------------------------------------
   function connectWebSocket() {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -44,15 +41,19 @@
           handleSyncProgress(msg.data);
           break;
 
-        case 'new-messages':
-          // Ignore real-time messages -- this is a one-shot viewer
+        case 'sync-phase':
+          handleSyncPhase(msg.data);
+          break;
+
+        case 'sync-complete':
+          handleSyncComplete(msg.data);
           break;
       }
     });
 
     ws.addEventListener('close', () => {
-      setStatus('disconnected', 'Disconnected');
-      setTimeout(connectWebSocket, 3000);
+      // Connection closing is expected after sync completes.
+      // Don't reconnect -- we serve from local DB now.
     });
 
     ws.addEventListener('error', () => {
@@ -62,8 +63,14 @@
 
   function handleStatusChange(status) {
     switch (status) {
+      case 'has-data':
+        // Server already has local data -- skip QR, load directly
+        qrContainer.classList.add('hidden');
+        loadFromLocalDB();
+        break;
+
       case 'connected':
-        setStatus('syncing', 'Connected, waiting for sync...');
+        setStatus('syncing', 'Connected, syncing history...');
         qrContainer.classList.add('hidden');
         progressBarContainer.classList.add('active');
         progressBar.style.width = '5%';
@@ -79,28 +86,39 @@
         break;
 
       case 'waiting':
-        setStatus('waiting', 'Waiting');
+        setStatus('waiting', 'Waiting for QR scan');
+        break;
+
+      case 'disconnected':
+        // Expected after sync -- do nothing, data is loaded
         break;
     }
   }
 
   function handleSyncProgress(data) {
-    syncInProgress = true;
     setStatus('syncing', `Syncing: ${data.chats} chats, ${data.messages} msgs`);
     statChats.textContent = `${data.chats} chats`;
     statMessages.textContent = `${data.messages} msgs`;
 
-    const progress = Math.min(90, 5 + (data.messages / 50));
+    const progress = Math.min(70, 5 + (data.messages / 60));
     progressBar.style.width = `${progress}%`;
+  }
 
-    // Reset the settle timer on every sync event.
-    // When sync events stop arriving for 5 seconds, we consider sync done.
-    clearTimeout(syncSettleTimer);
-    syncSettleTimer = setTimeout(() => {
-      if (!dataLoaded) {
-        loadEverything();
-      }
-    }, 5000);
+  function handleSyncPhase(data) {
+    if (data.phase === 'downloading-media') {
+      setStatus('syncing', `Downloading media: ${data.pending} files...`);
+      progressBar.style.width = '75%';
+    }
+  }
+
+  function handleSyncComplete(data) {
+    setStatus('syncing', 'Sync complete. Loading data...');
+    statChats.textContent = `${data.chats} chats`;
+    statMessages.textContent = `${data.messages} msgs`;
+    progressBar.style.width = '85%';
+
+    // Now load everything from local DB
+    loadFromLocalDB();
   }
 
   function setStatus(state, text) {
@@ -109,16 +127,15 @@
   }
 
   // -------------------------------------------------------
-  // B. Data Loading (one-shot)
+  // B. Data Loading (always from local DB)
   // -------------------------------------------------------
-  async function loadEverything() {
-    if (dataLoaded) return;
-    dataLoaded = true;
-    setStatus('syncing', 'Loading data...');
+  async function loadFromLocalDB() {
+    setStatus('syncing', 'Loading from local database...');
+    progressBarContainer.classList.add('active');
     progressBar.style.width = '90%';
 
     try {
-      // Fetch contacts, chats, and status in parallel
+      // Fetch contacts, chats in parallel
       const [chats, contacts] = await Promise.all([
         fetch('/api/chats').then(r => r.json()),
         fetch('/api/contacts').then(r => r.json()),
@@ -129,7 +146,6 @@
       for (const c of contacts) {
         contactMap[c.jid] = c.name || c.push_name || c.phone_number || c.jid.split('@')[0];
       }
-      // Also use chat names (sometimes richer than contact names)
       for (const chat of chats) {
         if (chat.name && !contactMap[chat.jid]) {
           contactMap[chat.jid] = chat.name;
@@ -164,7 +180,7 @@
       statMessages.textContent = `${totalMessages} msgs`;
 
       progressBar.style.width = '100%';
-      setStatus('connected', `Loaded: ${chats.length} chats, ${totalMessages} msgs`);
+      setStatus('connected', `Local DB: ${chats.length} chats, ${totalMessages} msgs`);
 
       setTimeout(() => {
         progressBarContainer.classList.remove('active');
@@ -172,7 +188,6 @@
       }, 2000);
     } catch (err) {
       console.error('[app] Failed to load data:', err);
-      dataLoaded = false; // Allow retry
       setStatus('disconnected', 'Load failed -- refresh to retry');
     }
   }
@@ -430,23 +445,6 @@
   // D. Initialization
   // -------------------------------------------------------
 
-  // On page load, check if data already exists in the DB
-  // (e.g., server already synced before page was opened)
-  async function checkExistingData() {
-    try {
-      const status = await fetch('/api/status').then(r => r.json());
-      statChats.textContent = `${status.total_chats} chats`;
-      statMessages.textContent = `${status.total_messages} msgs`;
-
-      if (status.total_chats > 0 && !dataLoaded && !syncInProgress) {
-        loadEverything();
-      }
-    } catch {
-      // Server not ready yet
-    }
-  }
-
-  // Boot
-  checkExistingData();
+  // Boot: connect WebSocket which tells us whether to sync or load
   connectWebSocket();
 })();

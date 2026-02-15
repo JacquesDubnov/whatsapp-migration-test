@@ -20,7 +20,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Initialize database
 const db = initDatabase();
 
-// REST API
+// REST API -- all reads from local SQLite
 
 app.get('/api/status', (req, res) => {
   const stats = db.getChatStats();
@@ -72,18 +72,31 @@ app.get('/api/media/:messageId', (req, res) => {
 // WebSocket connection handler
 wss.on('connection', (ws) => {
   console.log('[server] WebSocket client connected');
-  ws.send(JSON.stringify({ type: 'status', data: 'waiting' }));
+  // Tell the client whether we already have data or need to sync
+  const stats = db.getChatStats();
+  if (stats.total_chats > 0) {
+    ws.send(JSON.stringify({ type: 'status', data: 'has-data' }));
+  } else {
+    ws.send(JSON.stringify({ type: 'status', data: 'waiting' }));
+  }
 });
 
-// Start WhatsApp client
-createWhatsAppClient(db, wss).then(() => {
-  console.log('[server] WhatsApp client initialized');
-}).catch((err) => {
-  console.error('[server] WhatsApp client error:', err.message);
-});
-
-// Start server
+// Start server, then decide whether to sync
 server.listen(PORT, () => {
-  console.log(`[server] Running on http://localhost:${PORT}`);
-  console.log('[server] Waiting for QR code scan...');
+  const stats = db.getChatStats();
+
+  if (stats.total_chats > 0) {
+    console.log(`[server] Running on http://localhost:${PORT}`);
+    console.log(`[server] Local data found: ${stats.total_chats} chats, ${stats.total_messages} messages`);
+    console.log('[server] Serving from local database (no WhatsApp connection needed)');
+  } else {
+    console.log(`[server] Running on http://localhost:${PORT}`);
+    console.log('[server] No local data -- starting WhatsApp sync...');
+
+    createWhatsAppClient(db, wss).then(() => {
+      console.log('[server] WhatsApp client initialized, waiting for QR scan');
+    }).catch((err) => {
+      console.error('[server] WhatsApp client error:', err.message);
+    });
+  }
 });
