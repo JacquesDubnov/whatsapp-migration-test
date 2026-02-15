@@ -43,21 +43,30 @@ app.get('/api/chats/:jid/messages', (req, res) => {
   res.json(result);
 });
 
-app.get('/api/media/:chatJid/:messageId', (req, res) => {
-  const { chatJid, messageId } = req.params;
-  const mediaDir = path.join(__dirname, 'media', chatJid);
+app.get('/api/chats/:jid/messages/all', (req, res) => {
+  const { jid } = req.params;
+  const messages = db.getAllMessages(jid);
+  res.json(messages);
+});
 
-  if (!fs.existsSync(mediaDir)) {
+app.get('/api/contacts', (req, res) => {
+  const contacts = db.getContacts();
+  res.json(contacts);
+});
+
+app.get('/api/media/:messageId', (req, res) => {
+  const { messageId } = req.params;
+  const msg = db.getMessageById(messageId);
+
+  if (!msg || !msg.media_path) {
     return res.status(404).json({ error: 'Not found' });
   }
 
-  // Find the file -- extension varies
-  const files = fs.readdirSync(mediaDir).filter(f => f.startsWith(messageId));
-  if (files.length === 0) {
-    return res.status(404).json({ error: 'Not found' });
+  if (!fs.existsSync(msg.media_path)) {
+    return res.status(404).json({ error: 'File not found on disk' });
   }
 
-  res.sendFile(path.join(mediaDir, files[0]));
+  res.sendFile(msg.media_path);
 });
 
 // WebSocket connection handler

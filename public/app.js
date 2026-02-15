@@ -13,8 +13,10 @@
   const chatCardsContainer = document.getElementById('chat-cards-container');
 
   // State
-  const chatPages = {}; // jid -> current page
-  let isConnected = false;
+  let syncSettleTimer = null;
+  let dataLoaded = false;
+  let syncInProgress = false;
+  let contactMap = {}; // jid -> display name
 
   // -------------------------------------------------------
   // A. WebSocket
@@ -43,8 +45,7 @@
           break;
 
         case 'new-messages':
-          // Refresh stats on new messages
-          fetchStatus();
+          // Ignore real-time messages -- this is a one-shot viewer
           break;
       }
     });
@@ -62,13 +63,10 @@
   function handleStatusChange(status) {
     switch (status) {
       case 'connected':
-        isConnected = true;
-        setStatus('connected', 'Connected');
+        setStatus('syncing', 'Connected, waiting for sync...');
         qrContainer.classList.add('hidden');
         progressBarContainer.classList.add('active');
         progressBar.style.width = '5%';
-        // Start loading data
-        loadChats();
         break;
 
       case 'reconnecting':
@@ -76,7 +74,6 @@
         break;
 
       case 'logged_out':
-        isConnected = false;
         setStatus('disconnected', 'Logged Out');
         qrContainer.classList.remove('hidden');
         break;
@@ -88,13 +85,22 @@
   }
 
   function handleSyncProgress(data) {
-    setStatus('syncing', 'Syncing...');
+    syncInProgress = true;
+    setStatus('syncing', `Syncing: ${data.chats} chats, ${data.messages} msgs`);
     statChats.textContent = `${data.chats} chats`;
     statMessages.textContent = `${data.messages} msgs`;
 
-    // Approximate progress (history sync sends multiple batches)
-    const progress = Math.min(95, 5 + (data.messages / 100));
+    const progress = Math.min(90, 5 + (data.messages / 50));
     progressBar.style.width = `${progress}%`;
+
+    // Reset the settle timer on every sync event.
+    // When sync events stop arriving for 5 seconds, we consider sync done.
+    clearTimeout(syncSettleTimer);
+    syncSettleTimer = setTimeout(() => {
+      if (!dataLoaded) {
+        loadEverything();
+      }
+    }, 5000);
   }
 
   function setStatus(state, text) {
@@ -103,25 +109,72 @@
   }
 
   // -------------------------------------------------------
-  // B. Data Fetching
+  // B. Data Loading (one-shot)
   // -------------------------------------------------------
-  async function fetchChats() {
-    const res = await fetch('/api/chats');
-    return res.json();
-  }
+  async function loadEverything() {
+    if (dataLoaded) return;
+    dataLoaded = true;
+    setStatus('syncing', 'Loading data...');
+    progressBar.style.width = '90%';
 
-  async function fetchMessages(jid, page, limit) {
-    const params = new URLSearchParams({ page, limit });
-    const res = await fetch(`/api/chats/${encodeURIComponent(jid)}/messages?${params}`);
-    return res.json();
-  }
+    try {
+      // Fetch contacts, chats, and status in parallel
+      const [chats, contacts] = await Promise.all([
+        fetch('/api/chats').then(r => r.json()),
+        fetch('/api/contacts').then(r => r.json()),
+      ]);
 
-  async function fetchStatus() {
-    const res = await fetch('/api/status');
-    const data = await res.json();
-    statChats.textContent = `${data.total_chats} chats`;
-    statMessages.textContent = `${data.total_messages} msgs`;
-    return data;
+      // Build contact lookup: jid -> best display name
+      contactMap = {};
+      for (const c of contacts) {
+        contactMap[c.jid] = c.name || c.push_name || c.phone_number || c.jid.split('@')[0];
+      }
+      // Also use chat names (sometimes richer than contact names)
+      for (const chat of chats) {
+        if (chat.name && !contactMap[chat.jid]) {
+          contactMap[chat.jid] = chat.name;
+        }
+      }
+
+      chatCardsContainer.innerHTML = '';
+      progressBar.style.width = '93%';
+
+      // Fetch all messages for all chats in parallel
+      const messagesByChat = {};
+      const fetches = chats.map(chat =>
+        fetch(`/api/chats/${encodeURIComponent(chat.jid)}/messages/all`)
+          .then(r => r.json())
+          .then(msgs => { messagesByChat[chat.jid] = msgs; })
+      );
+      await Promise.all(fetches);
+
+      progressBar.style.width = '97%';
+
+      // Render everything
+      let totalMessages = 0;
+      for (const chat of chats) {
+        const messages = messagesByChat[chat.jid] || [];
+        totalMessages += messages.length;
+        const card = renderChatCard(chat, messages);
+        chatCardsContainer.appendChild(card);
+      }
+
+      // Final stats
+      statChats.textContent = `${chats.length} chats`;
+      statMessages.textContent = `${totalMessages} msgs`;
+
+      progressBar.style.width = '100%';
+      setStatus('connected', `Loaded: ${chats.length} chats, ${totalMessages} msgs`);
+
+      setTimeout(() => {
+        progressBarContainer.classList.remove('active');
+        progressBar.style.width = '0%';
+      }, 2000);
+    } catch (err) {
+      console.error('[app] Failed to load data:', err);
+      dataLoaded = false; // Allow retry
+      setStatus('disconnected', 'Load failed -- refresh to retry');
+    }
   }
 
   // -------------------------------------------------------
@@ -151,7 +204,7 @@
     return d.toLocaleDateString();
   }
 
-  function renderChatCard(chat) {
+  function renderChatCard(chat, messages) {
     const card = document.createElement('div');
     card.className = 'chat-card';
     card.dataset.jid = chat.jid;
@@ -162,7 +215,7 @@
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'chat-name';
-    nameSpan.textContent = chat.name || chat.jid.split('@')[0];
+    nameSpan.textContent = chat.name || contactMap[chat.jid] || chat.jid.split('@')[0];
     header.appendChild(nameSpan);
 
     const jidSpan = document.createElement('span');
@@ -187,7 +240,7 @@
     }
 
     const msgCount = document.createElement('span');
-    msgCount.textContent = `${chat.message_count || 0} msgs`;
+    msgCount.textContent = `${messages.length} msgs`;
     meta.appendChild(msgCount);
 
     const lastActive = document.createElement('span');
@@ -203,35 +256,38 @@
 
     card.appendChild(header);
 
-    // Body
+    // Body -- messages pre-rendered
     const body = document.createElement('div');
     body.className = 'chat-card-body';
 
-    const table = document.createElement('table');
-    table.className = 'message-table';
+    if (messages.length > 0) {
+      const table = document.createElement('table');
+      table.className = 'message-table';
 
-    const thead = document.createElement('thead');
-    thead.innerHTML = `<tr>
-      <th class="col-index">#</th>
-      <th class="col-timestamp">Timestamp</th>
-      <th class="col-sender">Sender</th>
-      <th class="col-content">Content</th>
-      <th class="col-emojis">Emojis</th>
-      <th class="col-media">Media</th>
-      <th class="col-id">ID</th>
-    </tr>`;
-    table.appendChild(thead);
+      const thead = document.createElement('thead');
+      thead.innerHTML = `<tr>
+        <th class="col-index">#</th>
+        <th class="col-timestamp">Timestamp</th>
+        <th class="col-sender">Sender</th>
+        <th class="col-content">Content</th>
+        <th class="col-emojis">Emojis</th>
+        <th class="col-media">Media</th>
+        <th class="col-id">ID</th>
+      </tr>`;
+      table.appendChild(thead);
 
-    const tbody = document.createElement('tbody');
-    table.appendChild(tbody);
-    body.appendChild(table);
-
-    // Load more button
-    const loadMore = document.createElement('button');
-    loadMore.className = 'load-more';
-    loadMore.textContent = 'Load messages';
-    loadMore.addEventListener('click', () => loadMessagesForChat(chat.jid, tbody, loadMore));
-    body.appendChild(loadMore);
+      const tbody = document.createElement('tbody');
+      for (let i = 0; i < messages.length; i++) {
+        tbody.appendChild(renderMessageRow(messages[i], i));
+      }
+      table.appendChild(tbody);
+      body.appendChild(table);
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'empty-chat';
+      empty.textContent = 'No messages synced';
+      body.appendChild(empty);
+    }
 
     card.appendChild(body);
 
@@ -265,7 +321,15 @@
     // Sender
     const tdSender = document.createElement('td');
     tdSender.className = 'col-sender sender-cell';
-    const senderText = msg.sender_name || (msg.sender_jid ? msg.sender_jid.split('@')[0] : 'Unknown');
+    let senderText;
+    if (msg.is_from_me) {
+      senderText = 'You';
+    } else {
+      senderText = msg.sender_name
+        || contactMap[msg.sender_jid]
+        || contactMap[msg.chat_jid]
+        || (msg.sender_jid ? msg.sender_jid.split('@')[0] : 'Unknown');
+    }
     tdSender.textContent = senderText;
     if (msg.sender_jid) {
       const tooltip = document.createElement('span');
@@ -279,12 +343,10 @@
     const tdContent = document.createElement('td');
     tdContent.className = 'col-content';
     tdContent.textContent = msg.content || '';
-    // Inline image if media downloaded
     if (msg.media_path && msg.media_type === 'image') {
-      const chatJid = msg.chat_jid.replace(/[/:]/g, '_');
       const img = document.createElement('img');
       img.className = 'inline-media';
-      img.src = `/api/media/${encodeURIComponent(chatJid)}/${encodeURIComponent(msg.id)}`;
+      img.src = `/api/media/${encodeURIComponent(msg.id)}`;
       img.alt = 'image';
       img.loading = 'lazy';
       tdContent.appendChild(img);
@@ -365,61 +427,26 @@
   }
 
   // -------------------------------------------------------
-  // D. Pagination
+  // D. Initialization
   // -------------------------------------------------------
-  async function loadMessagesForChat(jid, tbody, loadMoreBtn) {
-    const page = (chatPages[jid] || 0) + 1;
-    chatPages[jid] = page;
 
-    loadMoreBtn.disabled = true;
-    loadMoreBtn.textContent = 'Loading...';
+  // On page load, check if data already exists in the DB
+  // (e.g., server already synced before page was opened)
+  async function checkExistingData() {
+    try {
+      const status = await fetch('/api/status').then(r => r.json());
+      statChats.textContent = `${status.total_chats} chats`;
+      statMessages.textContent = `${status.total_messages} msgs`;
 
-    const result = await fetchMessages(jid, page, 100);
-    const offset = (page - 1) * 100;
-
-    for (let i = 0; i < result.messages.length; i++) {
-      const row = renderMessageRow(result.messages[i], offset + i);
-      tbody.appendChild(row);
-    }
-
-    const loaded = offset + result.messages.length;
-    if (loaded >= result.total) {
-      loadMoreBtn.textContent = `All ${result.total} messages loaded`;
-      loadMoreBtn.disabled = true;
-    } else {
-      loadMoreBtn.textContent = `Load more (${loaded}/${result.total})`;
-      loadMoreBtn.disabled = false;
-    }
-  }
-
-  // -------------------------------------------------------
-  // E. Initialization
-  // -------------------------------------------------------
-  async function loadChats() {
-    const chats = await fetchChats();
-    chatCardsContainer.innerHTML = '';
-
-    for (const chat of chats) {
-      const card = renderChatCard(chat);
-      chatCardsContainer.appendChild(card);
-    }
-
-    // Update progress
-    progressBar.style.width = '100%';
-    setTimeout(() => {
-      progressBarContainer.classList.remove('active');
-      progressBar.style.width = '0%';
-    }, 2000);
-
-    fetchStatus();
-
-    // Auto-refresh chats periodically during sync
-    if (isConnected) {
-      setTimeout(loadChats, 15000);
+      if (status.total_chats > 0 && !dataLoaded && !syncInProgress) {
+        loadEverything();
+      }
+    } catch {
+      // Server not ready yet
     }
   }
 
   // Boot
-  fetchStatus().catch(() => {});
+  checkExistingData();
   connectWebSocket();
 })();

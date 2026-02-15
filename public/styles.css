@@ -382,28 +382,12 @@ main {
   word-break: break-all;
 }
 
-/* Load more button */
-.load-more {
-  display: block;
-  width: 100%;
-  padding: 10px;
-  background: var(--bg-table-header);
-  border: none;
-  border-top: 1px solid var(--border-card);
-  color: var(--accent-blue);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  cursor: pointer;
-  transition: background 150ms ease;
-}
-
-.load-more:hover {
-  background: var(--bg-hover);
-}
-
-.load-more:disabled {
+/* Empty chat placeholder */
+.empty-chat {
+  padding: 24px;
+  text-align: center;
   color: var(--text-secondary);
-  cursor: default;
+  font-size: 11px;
 }
 
 /* Sender tooltip */

@@ -38,6 +38,12 @@ All project vision and product documents live in the Obsidian vault:
 - Must work with real WhatsApp export data
 - Must demonstrate the migration is feasible and document edge cases
 
+## Session Start Protocol
+
+1. Run `bash ~/.claude/scripts/coding-session-start.sh`
+2. Read this CLAUDE.md
+3. If resuming work, check handover below
+
 ## Handover System
 
 Uses the global handover system at `~/.claude/handovers/`. Follow the protocol in `~/.claude/handovers/PROTOCOL.md`.
